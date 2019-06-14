@@ -5,6 +5,9 @@
 
 Program converts widgets from opi to edl format.
 
+Currently, program supports converting CSS grouping containers as long
+as there isn't nested grouping containers (containers in containers).
+
 Supported EDM widgets:
 static text
 lines
@@ -16,7 +19,6 @@ bar monitor
 text monitor
 text update
 
-Logic to parse opi file starts on line 292.
 '''
 
 import os.path
@@ -36,9 +38,9 @@ edlScreenProps = ['4 0 1','beginScreenProperties','major 4','minor 0',\
     'botShadowColor index 44','snapToGrid','gridSize 5','endScreenProperties\n']
 
 # Function parses line form OPI file for parameter set by "prop".
-# "prop" must be a string.                                                 --->
+# "prop" must be a string.
 def returnProp(item,prop):
-    startText = '<'+prop+'>'
+    startText = '<'+prop+'>'                                                                                            #------
     endText = '</'+prop+'>'
     val = [s for s in item if startText in s][0][[s for s in item if \
         startText in s][0].find(startText)+len(startText):][:[s for s in \
@@ -67,8 +69,7 @@ def lookForImage(image):
         imageFile = image
     else:
         print('"'+image+'" not found.')
-        print('Put "'+image+'" in directory with OPI file and re-run \
-conversion.')
+        print('Put "'+image+'" in directory with OPI file and re-run conversion.')
         imageFile = 'NOT_FOUND'
     return imageFile
 
@@ -144,16 +145,14 @@ def convertColor(colorConst,widget):
     except:
         transparent = 'false'
     for e,line in enumerate(widget):
-        if '<background_color>' in line and '</background_color>' \
-        in widget[e+2]:
+        if '<background_color>' in line and '</background_color>' in widget[e+2]:
             origColor = widget[e+1].split('"')[1::2]
             dMatch = 99999
             match = 9999
             for index,color in enumerate(colorsList):
                 r1,g1,b1 = color
                 r2,g2,b2 = origColor
-                d = sqrt((int(r2)-int(r1))**2 + (int(g2)-int(g1))**2 + \
-                    (int(b2)-int(b1))**2)
+                d = sqrt((int(r2)-int(r1))**2 + (int(g2)-int(g1))**2 + (int(b2)-int(b1))**2)
                 if d < dMatch:
                     dMatch = d
                     match = index
@@ -186,7 +185,10 @@ def placeLine(widget,props,final):
     'Y_POINTS','}','endObjectProperties\n']
     pts,nPts = ptsGet(widget,edlLineFmt)
     fmt = edlPlaceWidget(props,pts)
-    outColor,transparent = convertColor(colorsList,widget)
+    try:
+        outColor,transparent = convertColor(colorsList,widget)
+    except:
+        outColor,transparent = '0','false'
     for row in fmt:
         row = row.replace('COLOR',outColor)
         row = row.replace('NUM_PTS',nPts)
@@ -196,13 +198,16 @@ def placeLine(widget,props,final):
     return final
 
 #circles (or ellipses)
-def placeCirlce(widget,props,final):
+def placeCircle(widget,props,final):
     edlCircleFmt = ['# (Circle)','object activeCircleClass',\
     'beginObjectProperties','major 4','minor 0','release 0','x X_POS',\
     'y Y_POS','w WIDTH','h HEIGHT','lineColor index 14',\
     'fillColor index COLOR','endObjectProperties\n']
     fmt = edlPlaceWidget(props,edlCircleFmt)
-    outColor,transparent = convertColor(colorsList,widget)
+    try:
+        outColor,transparent = convertColor(colorsList,widget)
+    except:
+        outColor,transparent = '0','false'
     for row in fmt:
         if 'fillColor' in row and transparent == 'false':
             final.append('fill')
@@ -217,7 +222,10 @@ def placeRectangle(widget,props,final):
     'y Y_POS','w WIDTH','h HEIGHT','lineColor index 14',\
     'fillColor index COLOR','endObjectProperties\n']
     fmt = edlPlaceWidget(props,edlRectangleFmt)
-    outColor,transparent = convertColor(colorsList,widget)
+    try:
+        outColor,transparent = convertColor(colorsList,widget)
+    except:
+        outColor,transparent = '0','false'
     for r,row in enumerate(fmt):
         if 'fillColor' in row and transparent == 'false':
             final.append('fill')
@@ -260,7 +268,10 @@ def placeBarMon(widget,props,final):
     'font "helvetica-medium-r-8.0"','border','precision "10"','min "MIN"',\
     'max "MAX"','scaleFormat "FFloat"','endObjectProperties\n']
     fmt = edlPlaceWidget(props,edlBarMonFmt)
-    outColor,transparent = convertColor(colorsList,widget)
+    try:
+        outColor,transparent = convertColor(colorsList,widget)
+    except:
+        outColor,transparent = '0','false'
     try:
         orientation = returnProp(widget,'horizontal')
     except:
@@ -287,106 +298,154 @@ def placeTextUpdate(widget,props,final):
     return final
 
 
+#def placeLED(widget,props,final):
+
+## puts together all above functions into one callable function to avoid
+## areas below with long repeated sections.
+def convertOPI(widget,final,unable,xShift=0,yShift=0):
+    wType = returnProp(widget,'widget_type')
+    xPos = str(int(returnProp(widget,'x'))+xShift)
+    yPos = str(int(returnProp(widget,'y'))+yShift)
+    width = returnProp(widget,'width')
+    height = returnProp(widget,'height')
+    props = [wType,xPos,yPos,width,height]
+    if wType == 'Text Update':
+        final = placeTextUpdate(widget,props,final)
+    elif wType == 'Label':
+        final = placeStaticText(widget,props,final)
+    elif wType == 'Image':
+        final = placeImage(widget,props,final)
+    elif wType == 'Polyline':
+        final = placeLine(widget,props,final)
+    elif wType == 'Rectangle' or wType == 'Rounded Rectangle':
+        final = placeRectangle(widget,props,final)
+    elif wType == 'Ellipse':
+        final = placeCircle(widget,props,final)
+    elif wType == 'Progress Bar' or wType == 'Tank':
+        final = placeBarMon(widget,props,final)
+    else:
+        unable.append(wType)
+    return final,unable
+
 ###############################################################################
-if __name__ == '__main__':
-    ### Parses input arguments.
-    parser = argparse.ArgumentParser()
-    parser.add_argument('opi',help='CSS .OPI file to convert to WEDM.')
-    parser.add_argument('-o','--output',help='Path of where to write resulting \
-    WEDM file to.')
-    args = parser.parse_args()
+### Parses input arguments.
+parser = argparse.ArgumentParser()
+parser.add_argument('opi',help='CSS .OPI file to convert to WEDM.')
+parser.add_argument('-o','--output',help='Path of where to write resulting WEDM file to.')
+args = parser.parse_args()
 
-    inputArg = args.opi
+inputArg = args.opi
 
-    if args.output != None:
-        outputPath = args.output
-        if outputPath == '.':  outputPath = os.getcwd()
-        if outputPath.strip()[-1] != '/':  outputPath += '/'
-        print('WEDM files will be written to "'+outputPath+'".')
-    else:
-        outputPath = ''
+if args.output != None:
+    outputPath = args.output
+    if outputPath == '.':  outputPath = os.getcwd()
+    if outputPath.strip()[-1] != '/':  outputPath += '/'
+    print('\nWEDM files will be written to "'+outputPath+'".')
+else:
+    outputPath = ''
 
-    ## Checks input arguement for opi files.
-    # Allows user to input a directory instead of a file to convert the
-    # directory all at once instead of having to run command for every
-    # file in path.
-    files = []
-    if os.path.isdir(inputArg):
-        if inputArg[-1] != '/':  inputArg += '/'
-        for f in os.listdir(inputArg):
-            if f[-4:].lower() == '.opi':
-                files.append(inputArg+f)
-    else:
-        if inputArg[-4:].lower() == '.opi':
-            files.append(inputArg)
+## Checks input arguement for opi files.
+# Allows user to input a directory instead of a file to convert the
+# directory all at once instead of having to run command for every
+# file in path.
+files = []
+if os.path.isdir(inputArg):
+    if inputArg[-1] != '/':  inputArg += '/'
+    for f in os.listdir(inputArg):
+        if f[-4:].lower() == '.opi':
+            files.append(inputArg+f)
+else:
+    if inputArg[-4:].lower() == '.opi':
+        files.append(inputArg)
 
-    if len(files) <= 0:
-        print('Error in reading in files. Check files and re-run script.')
-    else:
-        print('\nOPI files entered into script:')
-
-    for opi in files:
-        unable = []
-        print('\n'+opi)
-        # Creates .edl file name by removing opi file extension and
-        # appending .edl.
-        edl = opi[opi.rfind('/')+1:][:opi[opi.rfind('/')+1:].find('.opi')]\
-            +'.edl'
-
-        # Opens .opi file as text and stores all lines as list elements.
-        with open(opi,'r') as f:
-            opiLines = f.readlines()
-
-    # Processes OPI file lines to determine widget type and other properties.
-        final = []
-        # dimensions of screen.
-        width = returnProp(opiLines,'width')
-        height = returnProp(opiLines,'height')
-        for line in edlScreenProps:
-            line = line.replace('WIDTH',width)
-            line = line.replace('HEIGHT',height)
-            final.append(line)
-
-        hold = 0
-        #widget properties
-        for i,line in enumerate(opiLines):
-            #separates opi file into widgets.
-            if '<widget typeId=' in line and hold == 0:
-                hold = i
-            elif '</widget>' in line and hold != 0:
-                widget = opiLines[hold:i+1]
-                hold = 0
-                wType = returnProp(widget,'widget_type')
-                xPos = returnProp(widget,'x')
-                yPos = returnProp(widget,'y')
-                width = returnProp(widget,'width')
-                height = returnProp(widget,'height')
-                props = [wType,xPos,yPos,width,height]
-                if wType == 'Text Update':
-                    final = placeTextUpdate(widget,props,final)
-                elif wType == 'Label':
-                    final = placeStaticText(widget,props,final)
-                elif wType == 'Image':
-                    final = placeImage(widget,props,final)
-                elif wType == 'Polyline':
-                    final = placeLine(widget,props,final)
-                elif wType == 'Rectangle' or wType == 'Rounded Rectangle':
-                    final = placeRectangle(widget,props,final)
-                elif wType == 'Ellipse':
-                    final = placeCircle(widget,props,final)
-                elif wType == 'Progress Bar' or wType == 'Tank':
-                    final = placeBarMon(widget,props,final)
-                else:
-                    unable.append(wType)
-        if unable != []:
-            unable = set(unable)
-            print(', '.join(unable)+' conversion not supported. Widgets \
-skipped.')
+if len(files) <= 0:
+    print('Error in reading in files. Check files and re-run script.')
+else:
+    print('\nOPI files entered into script:')
 
 
-        # Writes resulting "final" list to text to .edl file for EDM.
-        with open(outputPath+edl,'w') as f:
-            for line in final:
-                f.write(line)
-                f.write('\n')
-        print(opi+' converted to '+edl+'\n')
+for opi in files:
+    unable = []
+    print('\n'+opi)
+    # Creates .edl file name by removing opi file extension and
+    # appending .edl.
+    edl = opi[opi.rfind('/')+1:][:opi[opi.rfind('/')+1:].find('.opi')]+'.edl'
+
+    # Opens .opi file as text and stores all lines as list elements.
+    with open(opi,'r') as f:
+        opiLines = f.readlines()
+
+# Processes OPI file lines to determine widget type and other properties.
+    final = []
+    # dimensions of screen.
+    width = returnProp(opiLines,'width')
+    height = returnProp(opiLines,'height')
+    for line in edlScreenProps:
+        line = line.replace('WIDTH',width)
+        line = line.replace('HEIGHT',height)
+        final.append(line)
+
+
+    ## part that handles grouping containers.
+    hold = 0
+    widgetList = []
+    #widget properties
+    for i,line in enumerate(opiLines):
+        line = opiLines[i]
+        #separates opi file into widgets.
+        if '<widget typeId=' in line and hold == 0:
+            hold = i
+            margin = line.split('<')[0]
+        elif '</widget>' in line and hold != 0 and line.split('<')[0] == margin:
+            widget = opiLines[hold:i+1]
+            hold = 0
+            if returnProp(widget,'widget_type') == 'Grouping Container':
+                groupHold = ['GROUP']
+                group = widget
+                groupX,groupY = 0,0
+                for j,line in enumerate(group):
+                    if '<widget typeId=' in line and j != 0:
+                        break
+                groupProps,groupWidgets = group[:j],group[j-1:]
+                groupX += int(returnProp(groupProps,'x'))
+                groupY += int(returnProp(groupProps,'y'))
+                grpBkgColor,grpBkgTransparent = convertColor(colorsList,groupProps)
+                groupHold.append([groupX,groupY,grpBkgTransparent,grpBkgColor])
+                hold2 = 0
+                nextTime = []
+                for k,line in enumerate(groupWidgets):
+                    if '<widget typeId=' in line and hold2 == 0:
+                        hold2 = k
+                        margin2 = line.split('<')[0]
+                    elif '</widget>' in line and hold2 != 0 and line.split('<')[0] == margin2:
+                        widget2 = groupWidgets[hold2:k+1]
+                        hold2 = 0
+                        if returnProp(widget2,'widget_type') != 'Grouping Container':
+                            groupHold.append(widget2)
+                        else:
+                            group = widget2
+
+
+                widgetList.append(groupHold)
+            else:
+                widgetList.append(widget)
+
+
+    for item in widgetList:
+        if item[0] != 'GROUP':
+            final,unable = convertOPI(item,final,unable)
+        else:
+            grpDesignator,[xShift,yShift,bkgColor,bkgTransparent] = item[:2]
+            for subitem in item[2:]:
+                final,unable = convertOPI(subitem,final,unable,xShift,yShift)
+    if unable != []:
+        unable = set(unable)
+        print(', '.join(unable)+' conversion not supported. Widgets skipped.')
+
+
+    # Writes resulting "final" list to text to .edl file for EDM.
+    with open(outputPath+edl,'w') as f:
+        for line in final:
+            f.write(line)
+            f.write('\n')
+    print(opi+' converted to '+edl+'\n')
