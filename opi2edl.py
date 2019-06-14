@@ -327,6 +327,46 @@ def convertOPI(widget,final,unable,xShift=0,yShift=0):
         unable.append(wType)
     return final,unable
 
+
+# parses through CSS group container to pull out widgets inside containers.
+# This function is recursive and will work for nested containers.
+def groupContainerParse(widget,widgetList):
+    noGroups = False
+    groups = [widget]
+    groupX,groupY = 0,0
+    while not noGroups:
+        nextIteration = []
+        for group in groups:
+            groupHold = ['GROUP']
+            for j,line in enumerate(group):
+                if '<widget typeId=' in line and j != 0:
+                    break
+            groupProps,groupWidgets = group[:j],group[j-1:]
+            groupX += int(returnProp(groupProps,'x'))
+            groupY += int(returnProp(groupProps,'y'))
+            grpBkgColor,grpBkgTransparent = convertColor(colorsList,groupProps)
+            groupHold.append([groupX,groupY,grpBkgTransparent,grpBkgColor])
+            hold2 = 0
+            nextTime = []
+            for k,line in enumerate(groupWidgets):
+                if '<widget typeId=' in line and hold2 == 0:
+                    hold2 = k
+                    margin2 = line.split('<')[0]
+                elif '</widget>' in line and hold2 != 0 and line.split('<')[0] == margin2:
+                    widget2 = groupWidgets[hold2:k+1]
+                    hold2 = 0
+                    if returnProp(widget2,'widget_type') != 'Grouping Container':
+                        groupHold.append(widget2)
+                    else:
+                        nextIteration.append(widget2)
+            widgetList.append(groupHold)
+        if len(nextIteration) != 0:
+            groups = nextIteration
+        else:
+            noGroups = True
+
+    return widgetList
+
 ###############################################################################
 ### Parses input arguments.
 parser = argparse.ArgumentParser()
@@ -400,35 +440,12 @@ for opi in files:
             widget = opiLines[hold:i+1]
             hold = 0
             if returnProp(widget,'widget_type') == 'Grouping Container':
-                groupHold = ['GROUP']
-                group = widget
-                groupX,groupY = 0,0
-                for j,line in enumerate(group):
-                    if '<widget typeId=' in line and j != 0:
-                        break
-                groupProps,groupWidgets = group[:j],group[j-1:]
-                groupX += int(returnProp(groupProps,'x'))
-                groupY += int(returnProp(groupProps,'y'))
-                grpBkgColor,grpBkgTransparent = convertColor(colorsList,groupProps)
-                groupHold.append([groupX,groupY,grpBkgTransparent,grpBkgColor])
-                hold2 = 0
-                nextTime = []
-                for k,line in enumerate(groupWidgets):
-                    if '<widget typeId=' in line and hold2 == 0:
-                        hold2 = k
-                        margin2 = line.split('<')[0]
-                    elif '</widget>' in line and hold2 != 0 and line.split('<')[0] == margin2:
-                        widget2 = groupWidgets[hold2:k+1]
-                        hold2 = 0
-                        if returnProp(widget2,'widget_type') != 'Grouping Container':
-                            groupHold.append(widget2)
-                        else:
-                            group = widget2
-
-
-                widgetList.append(groupHold)
+                widgetList = groupContainerParse(widget,widgetList)
             else:
                 widgetList.append(widget)
+
+
+
 
 
     for item in widgetList:
